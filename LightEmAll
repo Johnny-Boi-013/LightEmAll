@@ -10,17 +10,13 @@ import javalib.worldimages.*;
 
 import java.util.Random;
 
+import java.util.HashMap;
 
-/* TODO:
- * -representing the connections from a GamePiece to neighboring GamePieces
- * -implementing click-to-rotate
- */
-
+import java.util.Arrays;
 
 //Contains constants for LightEmAll and its related classes
 interface ILightEmAll {
   int TILE_LENGTH = 50;
-  int WIRE_WIDTH = 5;
 }
 
 class LightEmAll extends World implements ILightEmAll {
@@ -28,9 +24,9 @@ class LightEmAll extends World implements ILightEmAll {
   // i.e., represents the board in column-major order
   ArrayList<ArrayList<GamePiece>> board;
   // a list of all nodes
-  ArrayList<GamePiece> nodes;
+  ArrayList<GamePiece> nodes = new ArrayList<>();
   // a list of edges of the minimum spanning tree
-  // ArrayList<Edge> mst;
+  ArrayList<Edge> mst = new ArrayList<>();
   // the width and height of the board
   int width;
   int height;
@@ -38,15 +34,34 @@ class LightEmAll extends World implements ILightEmAll {
   // as well as its effective radius
   int powerRow;
   int powerCol;
-  int radius;
+  int radius = 7;
   int rows;
   int cols;
   boolean end;
+  boolean gameOver = false;
   WorldScene makeScene;
 
+  Random rand;
+  int timer;
+
+
+  LightEmAll(int width, int height) {
+    this(width, height, new Random());
+  }
+
+  LightEmAll(int width, int height, ArrayList<ArrayList<GamePiece>> board) {
+    this.width = width;
+    this.height = height;
+    this.board = board;
+    this.rows = width / ILightEmAll.TILE_LENGTH;
+    this.cols = height / ILightEmAll.TILE_LENGTH;
+    this.powerRow = 1;
+    this.powerCol = 1;
+    this.timer = 0;
+  }
 
   //LightEmAll constructor given board width and height in tiles
-  LightEmAll(int width, int height) {
+  LightEmAll(int width, int height, Random rand) {
     if (width < 2 || height < 2) {
       throw new IllegalArgumentException("LightEmAll width and " +
           "height must be greater than 1");
@@ -58,54 +73,110 @@ class LightEmAll extends World implements ILightEmAll {
     this.cols = height / ILightEmAll.TILE_LENGTH;
     this.width = width;
     this.height = height;
-    this.powerCol = 5;
-    this.powerRow = 5;
+    this.powerCol = this.rows / 2;
+    this.powerRow = this.cols / 2;
+    this.rand = rand;
+    this.timer = 0;
 
     //builds board of all vertical lines with a horizontal bar through the center
     //and power station at the center tile
     for (int r = 0; r < this.rows; r++) {
       ArrayList<GamePiece> column = new ArrayList<>();
-      for (int c = 0; c < this.cols - 1; c++) {
-        //adds power station GamePiece with vertical and horizontal wires
+      for (int c = 0; c < this.cols; c++) {
+
+        GamePiece piece = new GamePiece(true, true, true, true, r, c, rand);
         if (r == this.powerRow && c == this.powerCol) {
-          column.add(new GamePiece(true, true, true,
-              true, true, r, c));
-        } else if (c == powerCol && r == 0) {
-          column.add(new GamePiece(true, false, true,
-              true, r, c));
-        } else if (c == powerCol && r == rows - 1) {
-          column.add(new GamePiece(false, true, true,
-              true, r, c));
+          piece = new GamePiece(true, true, true, true, true, r, c, rand);
         }
-        //adds GamePiece with vertical and horizontal wires
-        else if (c == powerCol) {
-          column.add(new GamePiece(true, true, true,
-              true, r, c));
-        }
-        //adds GamePiece with vertical wires
-        else {
-          column.add(new GamePiece(false, false, true,
-              true, r, c));
-        }
+        column.add(piece);
+        nodes.add(piece);
       }
 
       //adds GamePiece with top wire as last element in column
-      column.add(new GamePiece(false, false, true,
-          false, r, this.cols - 1));
+      // column.add(new GamePiece(false, false, true,
+      //    false, r, this.cols - 1));
 
       this.board.add(column);
     }
 
+    // Generate all edges for the board
     for (int i = 0; i < this.rows; i++) {
       for (int j = 0; j < this.cols; j++) {
-        this.board.get(i).get(j).outEdges(this.board);
+        mst.addAll(this.board.get(i).get(j).outEdges(this.board));
       }
     }
 
-    System.out.println("" + width + height);
+    ArrayList<Edge> sortedMst = new ArrayList<>();
+    int minVal = 0;
+    // sort here, using mst
+    for (int j = 0; j < mst.size(); j++) {
+      for (int i = 0; i < mst.size(); i++) {
+        if (mst.get(i).weight < mst.get(minVal).weight) {
+          minVal = i;
+        }
+      }
+      sortedMst.add(mst.get(minVal));
+      mst.remove(minVal);
+      minVal = 0;
+    }
+
+    mst = new ArrayList<>();
+
+
+    // create a new hashmap
+    HashMap<GamePiece, GamePiece> hashMst = new HashMap<>();
+
+    // set the key of each gamepiece to itself
+    for (GamePiece piece : nodes) {
+      hashMst.put(piece, piece);
+    }
+
+    while (nodes.size() > mst.size()) {
+      sortedMst.get(0);
+      if (findRoot(hashMst, sortedMst.get(0).to).equals(findRoot(hashMst, sortedMst.get(0).from))) {
+        sortedMst.remove(0);
+      } else {
+        mst.add(sortedMst.get(0));
+        hashMst.put(hashMst.get(sortedMst.get(0).from), hashMst.get(sortedMst.get(0).to));
+        sortedMst.remove(0);
+      }
+    }
+
+    // set the top bottom left right of each piece based off of the mst
+
+    for (GamePiece piece : nodes) {
+      piece.left = false;
+      piece.right = false;
+      piece.top = false;
+      piece.bottom = false;
+    }
+
+    for (GamePiece piece : nodes) {
+      for (Edge e : mst) {
+        if (piece.equals(e.from)) {
+          if (piece.col + 1 == e.to.col) {
+            piece.right = true;
+            e.to.left = true;
+          }
+          if (piece.col - 1 == e.to.col) {
+            piece.left = true;
+            e.to.right = true;
+          }
+          if (piece.row + 1 == e.to.row) {
+            piece.bottom = true;
+            e.to.top = true;
+          }
+          if (piece.row - 1 == e.to.row) {
+            piece.top = true;
+            e.to.bottom = true;
+          }
+        }
+      }
+    }
+
+    // rotate
 
     //randomly rotates each GamePiece
-    Random rand = new Random();
     for (int c = 0; c < cols; c++) {
       for (int r = 0; r < rows; r++) {
         for (int i = 0; i < rand.nextInt(4); i++) {
@@ -114,8 +185,22 @@ class LightEmAll extends World implements ILightEmAll {
       }
     }
 
+    for (int i = 0; i < this.rows; i++) {
+      for (int j = 0; j < this.cols; j++) {
+        this.board.get(i).get(j).outEdges(this.board);
+      }
+    }
+
     this.board.get(powerCol).get(powerRow).powerConnected(this.board,
         powerCol, powerRow);
+  }
+
+  // Find the root of a GamePiece
+  public GamePiece findRoot(HashMap<GamePiece, GamePiece> mstHashMap, GamePiece piece) {
+    if (piece.equals(mstHashMap.get(piece))) {
+      return piece;
+    }
+    return findRoot(mstHashMap, mstHashMap.get(piece));
   }
 
   // Represents breadth first search method
@@ -145,11 +230,50 @@ class LightEmAll extends World implements ILightEmAll {
           worklist.add(e.to);
         }
         // add next to alreadySeen, since we're done with it
-        alreadySeen.add(0, next);
+        alreadySeen.add(next);
       }
     }
     // We haven't found the to GamePiece, and there are no more to try
     return false;
+  }
+
+  int bfsSearch(GamePiece from, GamePiece to, ArrayList<GamePiece> worklist) {
+    ArrayList<GamePiece> alreadySeen = new ArrayList<>();
+    ArrayList<Edge> edgeList = new ArrayList<>();
+
+    // Initialize the worklist with the from GamePiece
+    worklist.add(from);
+    // As long as the worklist isn't empty...
+    while (!worklist.isEmpty()) {
+      GamePiece next = worklist.get(0);
+      worklist.remove(0);
+      if (next.equals(to)) {
+        GamePiece current = to;
+        int counter = 0;
+        while (!current.equals(from)) {
+          for (Edge edge : edgeList) {
+            if (edge.to.equals(current)) {
+              current = edge.from;
+              counter++;
+              break;
+            }
+          }
+        }
+        return counter;
+      } else if (alreadySeen.contains(next)) {
+        // do nothing: we've already seen this one
+      } else {
+        // add all the neighbors of next to the worklist for further processing
+        for (Edge e : next.edges) {
+          edgeList.add(new Edge(next, e.to, 0));
+          worklist.add(e.to);
+        }
+        // add next to alreadySeen, since we're done with it
+        alreadySeen.add(next);
+      }
+    }
+    // We haven't found the to GamePiece, and there are no more to try
+    return 0;
   }
 
   // Draws the game board
@@ -162,15 +286,35 @@ class LightEmAll extends World implements ILightEmAll {
     }
     WorldScene ws = new WorldScene(width, height);
 
+    WorldImage scoreImg = new TextImage("Timer: " + this.timer, ILightEmAll.TILE_LENGTH / 1.5,
+        Color.BLACK);
+
     for (int i = 0; i < this.rows; i++) {
       for (int j = 0; j < this.cols; j++) {
-        WorldImage tile = this.board.get(i).get(j).drawGamePiece();
+        WorldImage tile = this.board.get(i).get(j).drawGamePiece(radius,
+            1 + bfsSearch(this.board.get(powerRow).get(powerCol),
+                this.board.get(i).get(j), new ArrayList<>()));
         ws.placeImageXY(tile, (j * ILightEmAll.TILE_LENGTH) + (ILightEmAll.TILE_LENGTH / 2),
             (i * ILightEmAll.TILE_LENGTH) + (ILightEmAll.TILE_LENGTH) / 2);
       }
     }
+
+    ws.placeImageXY(scoreImg, ILightEmAll.TILE_LENGTH * this.cols + this.cols * 5 + 50,
+        ILightEmAll.TILE_LENGTH);
+
+    if (this.end) {
+      ws.placeImageXY(new TextImage("CLICK TO RESTART",
+          20, Color.RED), this.width / 2, this.height + 50);
+    }
+
     return ws;
   }
+
+  // increases the timer every tick
+  public void onTick() {
+    this.timer++;
+  }
+
 
   // EFFECT:
   // Moves the power station when arrow keys are pressed
@@ -203,56 +347,78 @@ class LightEmAll extends World implements ILightEmAll {
     }
 
     this.board.get(powerRow).get(powerCol).powerStation = true;
+
+
   }
 
 
   //EFFECT:
   //Rotates the GamePiece the mouse is hovering over upon clicking
   public void onMouseClicked(Posn pos) {
-    //does not apply onMouseClicked when mouse is on a tile border
+
+    // does not apply onMouseClicked when mouse is on a tile border
     if (pos.x % TILE_LENGTH != 0 && pos.y % TILE_LENGTH != 0) {
-      int currentColumn = pos.y / TILE_LENGTH;
-      int currentRow = pos.x / TILE_LENGTH;
+      if (pos.x < width && pos.y < height) {
+        int currentColumn = pos.y / TILE_LENGTH;
+        int currentRow = pos.x / TILE_LENGTH;
+        this.board.get(currentColumn).get(currentRow).rotate();
+        for (ArrayList<GamePiece> list : board) {
+          for (GamePiece piece : list) {
+            piece.powered = false;
+            piece.outEdges(this.board);
+          }
+        }
 
-      for (ArrayList<GamePiece> list : board) {
-        for (GamePiece piece : list) {
-          piece.powered = false;
+
+        this.board.get(powerRow).get(powerCol).powerConnected(this.board,
+            powerRow, powerCol);
+
+        int counter = 0;
+        GamePiece powerStation = this.board.get(powerCol).get(powerRow);
+        for (ArrayList<GamePiece> pieces : this.board) {
+          for (GamePiece piece : pieces) {
+            if (bfsSearch(powerStation, piece, new ArrayList<>()) > 0) {
+              counter++;
+            }
+          }
+        }
+
+        counter = 1;
+        for (int i = 0; i < this.rows; i++) {
+          for (int j = 0; j < this.cols; j++) {
+            if (radius - bfsSearch(this.board.get(powerRow).get(powerCol),
+                this.board.get(i).get(j), new ArrayList<>()) > 0 &&
+                bfsSearch(this.board.get(powerRow).get(powerCol),
+                    this.board.get(i).get(j), new ArrayList<>()) != 0) {
+              counter++;
+            }
+          }
+        }
+
+        if (counter == this.nodes.size()) {
+          this.endOfWorld(null);
         }
       }
+    }
+    if (this.end) {
+      if (pos.x > 0 && pos.x < width) {
+        if (pos.y > 0 && pos.y < height) {
+          this.width = width;
+          this.height = height;
+          this.rand = new Random();
 
-      this.board.get(currentColumn).get(currentRow).rotate();
-
-      this.board.get(powerRow).get(powerCol).powerConnected(this.board,
-          powerRow, powerCol);
-
+        }
+      }
     }
   }
 
-  // Checks if player won the game
-  public boolean shouldWorldEnd() {
-
-
-    int counter = 0;
-    for (ArrayList<GamePiece> pieces : this.board) {
-      for (GamePiece piece : pieces) {
-        if (!bfs(board.get(powerRow).get(powerCol), piece)) {
-          return false;
-        }
-      }
-    }
-    System.out.println(counter);
-    return true;
-  }
-
-  // Shows game after it ends
-  public WorldEnd worldEnds() {
-    if (shouldWorldEnd()) {
-      WorldScene over = new WorldScene(500, 500);
-      over.placeImageXY(new TextImage("uh oh", 20,
-          new Color(200, 200, 0)), 50, 50);
-      return new WorldEnd(true, over);
-    }
-    return new WorldEnd(false, makeScene());
+  // End the game by telling player
+  // that they won
+  public WorldScene lastScene(String msg) {
+    WorldScene over = makeScene();
+    over.placeImageXY(new TextImage("You Win!", 20,
+        new Color(200, 200, 0)), 50, 50);
+    return over;
   }
 }
 
@@ -270,11 +436,13 @@ class GamePiece implements ILightEmAll {
   // whether the power station is on this piece
   boolean powerStation;
   boolean powered;
+
+  Random rand;
   ArrayList<Edge> edges;
 
 
   GamePiece(boolean left, boolean right, boolean top, boolean bottom,
-            boolean powerStation, int row, int col) {
+            boolean powerStation, int row, int col, Random rand) {
     if (!left && !right && !top && !bottom) {
       throw new IllegalArgumentException("GamePiece must have at least one wire");
     } else {
@@ -287,19 +455,31 @@ class GamePiece implements ILightEmAll {
     edges = new ArrayList<Edge>();
     this.row = row;
     this.col = col;
+    this.rand = rand;
+  }
+
+  GamePiece(boolean left, boolean right, boolean top, boolean bottom,
+            int row, int col, Random rand) {
+    this(left, right, top, bottom, false, row, col, rand);
   }
 
   GamePiece(boolean left, boolean right, boolean top, boolean bottom,
             int row, int col) {
-    this(left, right, top, bottom, false, row, col);
+    this(left, right, top, bottom, false, row, col, new Random());
+  }
+
+  GamePiece(boolean left, boolean right, boolean top, boolean bottom, boolean powerStation,
+            int row, int col) {
+    this(left, right, top, bottom, powerStation, row, col, new Random());
   }
 
   // Draws each individual game piece
-  public WorldImage drawGamePiece() {
+  public WorldImage drawGamePiece(int radius, int bfsDistance) {
 
     Color poweredColor = null;
     if (powered || powerStation) {
-      poweredColor = Color.YELLOW;
+      poweredColor = new Color(Math.max(0, 255 - ((255 / radius) * bfsDistance)),
+          Math.max(128 - (128 / radius) * bfsDistance, 0), 0);
     } else {
       poweredColor = Color.lightGray;
     }
@@ -320,36 +500,25 @@ class GamePiece implements ILightEmAll {
             new StarImage(ILightEmAll.TILE_LENGTH / 3, 7,
                 OutlineMode.SOLID, new Color(0, 255, 255)));
 
-    String str = "";
-
     if (left) {
       tile = new OverlayOffsetAlign(AlignModeX.LEFT, AlignModeY.MIDDLE,
           horizontalPiece, 0, 0, tile);
-      str += "l";
     }
     if (right) {
       tile = new OverlayOffsetAlign(AlignModeX.RIGHT, AlignModeY.MIDDLE,
           horizontalPiece, 0, 0, tile);
-      str += "r";
     }
     if (top) {
       tile = new OverlayOffsetAlign(AlignModeX.CENTER, AlignModeY.TOP,
           verticalPiece, 0, 0, tile);
-      str += "t";
     }
     if (bottom) {
       tile = new OverlayOffsetAlign(AlignModeX.CENTER, AlignModeY.BOTTOM,
           verticalPiece, 0, 0, tile);
-      str += "b";
     }
     if (powerStation) {
       tile = new OverlayImage(powerStationImg, tile);
     }
-
-
-    tile = new OverlayImage(new TextImage(String.valueOf(row) + " " +
-        String.valueOf(col), 12, new Color(255, 255, 0)), tile);
-
 
     return tile;
   }
@@ -380,64 +549,27 @@ class GamePiece implements ILightEmAll {
     if (right && powerCol < board.size() - 1 && board.get(powerRow).get(powerCol + 1).left) {
       if (!board.get(powerRow).get(powerCol + 1).powered) {
         board.get(powerRow).get(powerCol + 1).powered = true;
-        //   System.out.println("bottom" + row + col);
         board.get(powerRow).get(powerCol + 1).powerConnected(board, powerRow, powerCol + 1);
       }
     }
   }
 
   // Creates all the edges
-  public void outEdges(ArrayList<ArrayList<GamePiece>> board) {
-    edges = new ArrayList<>();
+  public ArrayList<Edge> outEdges(ArrayList<ArrayList<GamePiece>> board) {
+    this.edges = new ArrayList<>();
     if (top && row > 0 && board.get(row - 1).get(col).bottom) {
-      edges.add(new Edge(this, board.get(row - 1).get(col)));
+      this.edges.add(new Edge(this, board.get(row - 1).get(col), rand.nextInt(5) * 10));
     }
     if (bottom && row < board.get(0).size() - 1 && board.get(row + 1).get(col).top) {
-      edges.add(new Edge(this, board.get(row + 1).get(col)));
+      this.edges.add(new Edge(this, board.get(row + 1).get(col), rand.nextInt(5) * 10));
     }
     if (left && col > 0 && board.get(row).get(col - 1).right) {
-      edges.add(new Edge(this, board.get(row).get(col - 1)));
+      this.edges.add(new Edge(this, board.get(row).get(col - 1), rand.nextInt(5) * 10));
     }
     if (right && col < board.size() - 1 && board.get(row).get(col + 1).left) {
-      edges.add(new Edge(this, board.get(row).get(col + 1)));
+      this.edges.add(new Edge(this, board.get(row).get(col + 1), rand.nextInt(5) * 10));
     }
-  }
-
-  //Is this GamePiece connected to the given GamePiece by wire?
-  public boolean isConnected(GamePiece that) {
-    boolean topConnect = !this.top || that.bottom;
-    boolean rightConnect = !this.right || that.left;
-    boolean bottomConnect = !this.bottom || that.top;
-    boolean leftConnect = !this.left || that.right;
-
-    return topConnect && rightConnect && bottomConnect && leftConnect;
-  }
-
-  // Adds this and all connected nodes to the given pieces
-  public void connectedToAll(ArrayList<GamePiece> queue,
-                             ArrayList<GamePiece> visitedPieces,
-                             ArrayList<ArrayList<GamePiece>> board) {
-
-    if (!visitedPieces.contains(this)) {
-      visitedPieces.add(this);
-    }
-
-    if (left && col > 0 && board.get(col - 1).get(row).right) {
-      queue.add(board.get(col - 1).get(row));
-    }
-    if (right && col + 1 < board.size() && board.get(col + 1).get(row).left) {
-      queue.add(board.get(col + 1).get(row));
-    }
-    if (top && row > 0 && board.get(col).get(row - 1).bottom) {
-      queue.add(board.get(col).get(row - 1));
-    }
-    if (bottom && row + 1 < board.get(col).size() && board.get(col).get(row + 1).top) {
-      queue.add(board.get(col).get(row + 1));
-    }
-
-    GamePiece g = queue.get(0);
-    queue.remove(0);
-    g.connectedToAll(queue, visitedPieces, board);
+    return this.edges;
   }
 
   //Rotates this GamePiece by 90 degrees clockwise
@@ -451,51 +583,6 @@ class GamePiece implements ILightEmAll {
     this.right = top;
     this.top = originalLeft;
   }
-
-  // Generate an image of this, the given GamePiece.
-  // - size: the size of the tile, in pixels
-  // - wireWidth: the width of wires, in pixels
-  // - wireColor: the Color to use for rendering wires on this
-  // - powerStation: if true, draws a fancy star on this tile to represent the power station
-  //
-  WorldImage tileImage(int size, int wireWidth, Color wireColor, boolean hasPowerStation) {
-    // Start tile image off as a blue square with a wire-width square in the middle,
-    // to make image "cleaner" (will look strange if tile has no wire, but that can't be)
-    WorldImage image = new OverlayImage(
-        new RectangleImage(wireWidth, wireWidth, OutlineMode.SOLID, wireColor),
-        new RectangleImage(size, size, OutlineMode.SOLID, Color.DARK_GRAY));
-    WorldImage vWire = new RectangleImage(wireWidth, (size + 1) / 2,
-        OutlineMode.SOLID, wireColor);
-    WorldImage hWire = new RectangleImage((size + 1) / 2, wireWidth,
-        OutlineMode.SOLID, wireColor);
-
-    if (this.top) {
-      image = new OverlayOffsetAlign(AlignModeX.CENTER, AlignModeY.TOP,
-          vWire, 0, 0, image);
-    }
-    if (this.right) {
-      image = new OverlayOffsetAlign(AlignModeX.RIGHT, AlignModeY.MIDDLE,
-          hWire, 0, 0, image);
-    }
-    if (this.bottom) {
-      image = new OverlayOffsetAlign(AlignModeX.CENTER, AlignModeY.BOTTOM,
-          vWire, 0, 0, image);
-    }
-    if (this.left) {
-      image = new OverlayOffsetAlign(AlignModeX.LEFT, AlignModeY.MIDDLE,
-          hWire, 0, 0, image);
-    }
-    if (hasPowerStation) {
-      image = new OverlayImage(
-          new OverlayImage(
-              new StarImage(size / 3, 7, OutlineMode.OUTLINE,
-                  new Color(255, 128, 0)),
-              new StarImage(size / 3, 7, OutlineMode.SOLID,
-                  new Color(0, 255, 255))),
-          image);
-    }
-    return image;
-  }
 }
 
 class Edge {
@@ -503,164 +590,354 @@ class Edge {
   GamePiece to;
   int weight;
 
-  Edge(GamePiece from, GamePiece to) {
+  Edge(GamePiece from, GamePiece to, int weight) {
     this.from = from;
     this.to = to;
+    this.weight = weight;
+  }
+
+  Edge(GamePiece from, GamePiece to) {
+    this(from, to, 5);
   }
 }
 
 
 //Represents examples and tests for LightEmAll and GamePiece
 class ExamplesLEA implements ILightEmAll {
-  LightEmAll lukas = new LightEmAll(500, 500);
+  LightEmAll lukas = new LightEmAll(200, 200, new Random(10));
 
   void testBigBang(Tester t) {
-    lukas.bigBang(1800, 1800, 0.01f);
+    lukas.bigBang(400, 400, 1);
   }
 
   GamePiece allWiresPowerStation;
-  GamePiece topWire;
-  GamePiece leftRightWires;
+  GamePiece leftRightWiresTop;
+  GamePiece rightWireTop;
+  GamePiece leftWireTop;
+  GamePiece leftRightWiresBottom;
+  GamePiece rightWireBottom;
+  GamePiece leftWireBottom;
+  GamePiece rightWireMiddle;
+  GamePiece leftWireMiddle;
 
+  ArrayList<GamePiece> row1;
+  ArrayList<GamePiece> row2;
+  ArrayList<GamePiece> row3;
+
+  ArrayList<ArrayList<GamePiece>> board;
+
+  LightEmAll jon;
 
   //Initializes examples for testing
   void initialize() {
     allWiresPowerStation = new GamePiece(true, true, true,
-        true, true, 5, 5);
-    topWire = new GamePiece(false, false, true,
-        false, 3, 3);
-    leftRightWires = new GamePiece(true, true, false,
-        false, 3, 3);
+        true, true, 1, 1);
+    leftRightWiresTop = new GamePiece(true, true, false,
+        true, 0, 1);
+    rightWireTop = new GamePiece(false, true, false,
+        false, 0, 0);
+    leftWireTop = new GamePiece(true, false, false,
+        false, 0, 2);
+    leftRightWiresBottom = new GamePiece(true, true, true,
+        false, false, 2, 1);
+    rightWireBottom = new GamePiece(false, true, false,
+        false, false, 2, 0);
+    leftWireBottom = new GamePiece(true, false, false,
+        false, false, 2, 2);
+    rightWireMiddle = new GamePiece(false, true, false,
+        false, false, 1, 0);
+    leftWireMiddle = new GamePiece(true, false, false,
+        false, false, 1, 2);
+
+    row1 = new ArrayList<>(Arrays.asList(rightWireTop, leftRightWiresTop, leftWireTop));
+    row2 = new ArrayList<>(Arrays.asList(rightWireMiddle, allWiresPowerStation, leftWireMiddle));
+    row3 = new ArrayList<>(Arrays.asList(rightWireBottom, leftRightWiresBottom, leftWireBottom));
+
+    board = new ArrayList<>(Arrays.asList(row1, row2, row3));
+
+    jon = new LightEmAll(150, 150, board);
+
+    jon.powerRow = 1;
+    jon.powerCol = 1;
   }
 
   // Test the LightEmAll constructor
   void testLightEmAllConstructor(Tester t) {
-    LightEmAll lightEmAll = new LightEmAll(500, 500);
-    t.checkExpect(lightEmAll.width, 500);
-    t.checkExpect(lightEmAll.height, 500);
-    // Add more checks as needed
+    initialize();
+
+    t.checkExpect(jon.width, 150);
+    t.checkExpect(jon.height, 150);
+    t.checkExpect(jon.rows, 3);
+    t.checkExpect(jon.cols, 3);
+    t.checkConstructorException(new IllegalArgumentException("LightEmAll width and height " +
+        "must be greater than 1"), "LightEmAll", 0, 2);
+    t.checkConstructorException(new IllegalArgumentException("LightEmAll width and height " +
+        "must be greater than 1"), "LightEmAll", 2, 0);
+  }
+
+  // Test the outEdges method
+  void testOutEdges(Tester t) {
+    initialize();
+
+    Edge edge1 = new Edge(allWiresPowerStation,
+        board.get(0).get(1), 5);
+    Edge edge2 = new Edge(allWiresPowerStation,
+        board.get(2).get(1), 5);
+    Edge edge3 = new Edge(allWiresPowerStation,
+        board.get(1).get(0), 5);
+    Edge edge4 = new Edge(allWiresPowerStation,
+        board.get(1).get(2), 5);
+
+    ArrayList<Edge> edgesPowerStation = new ArrayList<>();
+
+    edgesPowerStation.add(edge1);
+    edgesPowerStation.add(edge2);
+    edgesPowerStation.add(edge3);
+    edgesPowerStation.add(edge4);
+
+    t.checkExpect(allWiresPowerStation.outEdges(jon.board),
+        edgesPowerStation);
   }
 
   // Test the bfs method of the LightEmAll class
   void testBfs(Tester t) {
-    LightEmAll lightEmAll = new LightEmAll(500, 500);
-    GamePiece from = lightEmAll.board.get(0).get(0);
-    GamePiece to = lightEmAll.board.get(1).get(1);
-    t.checkExpect(lightEmAll.bfs(from, to), true);
-    // Add more checks as needed
+    initialize();
+
+    GamePiece from = allWiresPowerStation;
+    GamePiece to = leftRightWiresTop;
+
+    allWiresPowerStation.outEdges(jon.board);
+
+    t.checkExpect(jon.bfs(from, to), true);
+
+    initialize();
+
+    GamePiece from2 = leftRightWiresBottom;
+    GamePiece to2 = rightWireBottom;
+
+    leftRightWiresBottom.outEdges(jon.board);
+
+    t.checkExpect(jon.bfs(from2, to2), true);
   }
 
   // Test the searchHelp method of the LightEmAll class
   void testSearchHelp(Tester t) {
-    LightEmAll lightEmAll = new LightEmAll(500, 500);
-    GamePiece from = lightEmAll.board.get(0).get(0);
-    GamePiece to = lightEmAll.board.get(1).get(1);
-    ArrayList<GamePiece> worklist = new ArrayList<>();
-    t.checkExpect(lightEmAll.searchHelp(from, to, worklist), true);
-    // Add more checks as needed
+    initialize();
+
+    GamePiece from = jon.board.get(0).get(0);
+    GamePiece to = jon.board.get(1).get(1);
+    ArrayList<GamePiece> worklist = new ArrayList<>(Arrays.asList(from, to));
+
+    t.checkExpect(jon.searchHelp(from, to, worklist), true);
+
+    initialize();
+
+    GamePiece from2 = jon.board.get(2).get(0);
+    GamePiece to2 = jon.board.get(0).get(2);
+    ArrayList<GamePiece> worklist2 = new ArrayList<>(Arrays.asList(from2, to2));
+
+    t.checkExpect(jon.searchHelp(from2, to2, worklist2), true);
+  }
+
+  // Tests drawGamePiece method
+  void testDrawGamePiece(Tester t) {
+    initialize();
+
+    WorldImage hp = new RectangleImage(ILightEmAll.TILE_LENGTH / 2,
+        ILightEmAll.TILE_LENGTH / 10, OutlineMode.SOLID, Color.lightGray);
+
+    WorldImage square = new OverlayImage(
+        new RectangleImage(ILightEmAll.TILE_LENGTH, ILightEmAll.TILE_LENGTH,
+            OutlineMode.OUTLINE, Color.BLACK),
+        new RectangleImage(ILightEmAll.TILE_LENGTH, ILightEmAll.TILE_LENGTH,
+            OutlineMode.SOLID, Color.darkGray));
+
+    WorldImage gp1 = rightWireTop.drawGamePiece(5, 2);
+    WorldImage gp2 = leftWireMiddle.drawGamePiece(5, 2);
+
+    t.checkExpect(gp1, new OverlayOffsetAlign(AlignModeX.RIGHT, AlignModeY.MIDDLE,
+        hp, 0, 0, square));
+
+    t.checkExpect(gp2, new OverlayOffsetAlign(AlignModeX.LEFT, AlignModeY.MIDDLE,
+        hp, 0, 0, square));
   }
 
   // Test the makeScene method of the LightEmAll class
   void testMakeScene(Tester t) {
-    LightEmAll lightEmAll = new LightEmAll(500, 500);
-    WorldScene scene = lightEmAll.makeScene();
-    // Check the properties of the scene or use scene methods to verify
-    // Add more checks as needed
+    WorldScene ws = new WorldScene(150, 150);
+
+    initialize();
+
+    for (int i = 0; i < 3; i++) {
+      for (int j = 0; j < 3; j++) {
+        WorldImage tile = board.get(i).get(j).drawGamePiece(5, 2);
+        ws.placeImageXY(tile, (j * ILightEmAll.TILE_LENGTH) + (ILightEmAll.TILE_LENGTH / 2),
+            (i * ILightEmAll.TILE_LENGTH) + (ILightEmAll.TILE_LENGTH) / 2);
+      }
+    }
+
+    t.checkExpect(jon.makeScene(), ws);
+
+    jon.end = true;
+
+    WorldScene ws2 = new WorldScene(150, 150);
+    ws2.placeImageXY(new TextImage("GAME OVER", 20, Color.RED),
+        150 / 2, 150 / 2);
+
+    t.checkExpect(jon.makeScene(), ws2);
   }
 
   // Test the onKeyEvent method of the LightEmAll class
   void testOnKeyEvent(Tester t) {
-    LightEmAll lightEmAll = new LightEmAll(500, 500);
-    lightEmAll.onKeyEvent("left");
-    // Check the state after invoking the method with different keys
-    // Add more checks as needed
+    initialize();
+
+    jon.powerCol = 1;
+    jon.powerRow = 1;
+    jon.onKeyEvent("left");
+    t.checkExpect(jon.powerCol, 0);
+    jon.onKeyEvent("left");
+    t.checkExpect(jon.powerCol, 0);
+    jon.onKeyEvent("right");
+    t.checkExpect(jon.powerCol, 1);
+    jon.onKeyEvent("right");
+    t.checkExpect(jon.powerCol, 2);
+    jon.onKeyEvent("right");
+    t.checkExpect(jon.powerCol, 2);
+    jon.onKeyEvent("left");
+    jon.onKeyEvent("up");
+    t.checkExpect(jon.powerRow, 0);
+    jon.onKeyEvent("up");
+    t.checkExpect(jon.powerRow, 0);
+    jon.onKeyEvent("down");
+    t.checkExpect(jon.powerRow, 1);
+    jon.onKeyEvent("down");
+    t.checkExpect(jon.powerRow, 2);
+    jon.onKeyEvent("down");
+    t.checkExpect(jon.powerRow, 2);
   }
+
 
   // Test the onMouseClicked method of the LightEmAll class
   void testOnMouseClicked(Tester t) {
-    LightEmAll lightEmAll = new LightEmAll(500, 500);
-    lightEmAll.onMouseClicked(new Posn(50, 50));
-    // Check the state after invoking the method with different positions
-    // Add more checks as needed
+    initialize();
+    GamePiece gp1 = rightWireTop;
+    gp1.rotate();
+
+    t.checkExpect(rightWireTop, rightWireTop);
+    jon.onMouseClicked(new Posn(50, 50));
+    t.checkExpect(rightWireTop, gp1);
+
+    initialize();
+    GamePiece gp2 = leftWireTop;
+    gp2.rotate();
+
+    t.checkExpect(leftWireTop, leftWireTop);
+    jon.onMouseClicked(new Posn(113, 50));
+    t.checkExpect(leftWireTop, gp2);
   }
 
-  // Test the shouldWorldEnd method of the LightEmAll class
-  void testShouldWorldEnd(Tester t) {
-    LightEmAll lightEmAll = new LightEmAll(500, 500);
-    t.checkExpect(lightEmAll.shouldWorldEnd(), false);
-    // Check the state and logic of the method
-    // Add more checks as needed
+
+  // Test the lastScene method of the LightEmAll class
+  void testLastScene(Tester t) {
+    initialize();
+
+    LightEmAll jon1 = jon;
+
+    for (int i = 0; i < board.size(); i++) {
+      for (int j = 0; j < board.get(i).size(); j++) {
+        board.get(i).get(j).powered = true;
+      }
+    }
+
+    WorldScene ws = jon1.makeScene();
+    ws.placeImageXY(new TextImage("You Win!", 20,
+        new Color(200, 200, 0)), 50, 50);
+
+    t.checkExpect(jon.lastScene(null), ws);
   }
 
-  // Test the worldEnds method of the LightEmAll class
-  void testWorldEnds(Tester t) {
-    LightEmAll lightEmAll = new LightEmAll(500, 500);
-    WorldEnd worldEnd = lightEmAll.worldEnds();
-    // Check the properties of the WorldEnd object or use its methods to verify
-    // Add more checks as needed
-  }
-
-  // Test the drawGamePiece method of the GamePiece class
-  void testDrawGamePiece(Tester t) {
-    GamePiece gamePiece = new GamePiece(true, true, false,
-        false, 0, 0);
-    WorldImage image = gamePiece.drawGamePiece();
-    // Check the properties of the image or use its methods to verify
-    // Add more checks as needed
-  }
 
   // Test the powerConnected method of the GamePiece class
   void testPowerConnected(Tester t) {
-    LightEmAll lightEmAll = new LightEmAll(500, 500);
-    lightEmAll.board.get(0).get(0).powerConnected(lightEmAll.board, 0, 0);
-    // Check the state after invoking the method
-    // Add more checks as needed
-  }
+    initialize();
 
-  // Test the outEdges method of the GamePiece class
-  void testOutEdges(Tester t) {
-    LightEmAll lightEmAll = new LightEmAll(500, 500);
-    lightEmAll.board.get(0).get(0).outEdges(lightEmAll.board);
-    // Check the state after invoking the method
-    // Add more checks as needed
-  }
+    t.checkExpect(leftRightWiresBottom.powered, false);
 
-  // Test the isConnected method of the GamePiece class
-  void testIsConnected(Tester t) {
-    GamePiece piece1 = new GamePiece(true, false, false,
-        false, 0, 0);
-    GamePiece piece2 = new GamePiece(false, true, false,
-        false, 0, 1);
-    t.checkExpect(piece1.isConnected(piece2), true);
-    // Add more checks as needed
-  }
+    allWiresPowerStation.powerConnected(board, 1, 1);
 
-  // Test the connectedToAll method of the GamePiece class
-  void testConnectedToAll(Tester t) {
-    LightEmAll lightEmAll = new LightEmAll(500, 500);
-    ArrayList<GamePiece> queue = new ArrayList<>();
-    ArrayList<GamePiece> visitedPieces = new ArrayList<>();
-    lightEmAll.board.get(0).get(0).connectedToAll(queue, visitedPieces, lightEmAll.board);
-    // Check the state after invoking the method
-    // Add more checks as needed
+    t.checkExpect(leftRightWiresBottom.powered, true);
+
+    initialize();
+
+    t.checkExpect(rightWireTop.powered, false);
+
+    allWiresPowerStation.powerConnected(board, 1, 1);
+
+    t.checkExpect(rightWireTop.powered, true);
+
   }
 
   // Test the rotate method of the GamePiece class
   void testRotate(Tester t) {
-    GamePiece gamePiece = new GamePiece(true, false, true,
-        false, 0, 0);
-    gamePiece.rotate();
-    // Check the state after invoking the method
-    // Add more checks as needed
+    initialize();
+
+    GamePiece test1 = new GamePiece(false, true, true,
+        true, 2, 1);
+    GamePiece test2 = new GamePiece(false, false, false,
+        true, 0, 0);
+
+    t.checkExpect(leftRightWiresBottom, leftRightWiresBottom);
+    leftRightWiresBottom.rotate();
+    t.checkExpect(leftRightWiresBottom, test1);
+
+    t.checkExpect(rightWireTop, rightWireTop);
+    rightWireTop.rotate();
+    t.checkExpect(rightWireTop, test2);
   }
 
-  // Test the tileImage method of the GamePiece class
-  void testTileImage(Tester t) {
-    GamePiece gamePiece = new GamePiece(true, false, true,
-        false, 0, 0);
-    WorldImage image = gamePiece.tileImage(50, 5,
-        java.awt.Color.BLACK, false);
-    // Check the properties of the image or use its methods to verify
-    // Add more checks as needed
+
+  // Tests findRoot method
+  void testFindRoot(Tester t) {
+    initialize();
+
+    Edge edge0 = new Edge(allWiresPowerStation, rightWireMiddle, 1);
+    Edge edge1 = new Edge(rightWireMiddle, allWiresPowerStation, 1);
+    HashMap<GamePiece, GamePiece> hash0 = new HashMap<GamePiece, GamePiece>();
+
+    hash0.put(allWiresPowerStation, allWiresPowerStation);
+    hash0.put(rightWireMiddle, rightWireMiddle);
+
+    t.checkExpect(jon.findRoot(hash0, rightWireMiddle), false);
+    // technically dont connect here
+
+    HashMap<GamePiece, GamePiece> hash1 = new HashMap<GamePiece, GamePiece>();
+    hash0.put(allWiresPowerStation, allWiresPowerStation);
+    hash0.put(rightWireMiddle, allWiresPowerStation);
+
+    t.checkExpect(jon.findRoot(hash1, rightWireMiddle), true);
+  }
+
+  // Test the bfsSearch method of the LightEmAll class
+  void testBfsSearch(Tester t) {
+    initialize();
+
+    // Shortest path exists
+    GamePiece from1 = jon.board.get(0).get(0);
+    GamePiece to1 = jon.board.get(1).get(1);
+    int distance1 = jon.bfsSearch(from1, to1, new ArrayList<>());
+    t.checkExpect(distance1, 1);
+
+    // No path exists
+    GamePiece from2 = jon.board.get(0).get(0);
+    GamePiece to2 = jon.board.get(2).get(2);
+    int distance2 = jon.bfsSearch(from2, to2, new ArrayList<>());
+    t.checkExpect(distance2, 0);
+
+    // Complex path
+    GamePiece from3 = jon.board.get(0).get(0);
+    GamePiece to3 = jon.board.get(2).get(1);
+    int distance3 = jon.bfsSearch(from3, to3, new ArrayList<>());
+    t.checkExpect(distance3, 3);
+    // Expected distance might vary depending on the specific maze configuration
   }
 }
